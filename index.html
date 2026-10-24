@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>回本與現金流計算機</title>
+<style>
+:root{--bg:#eef1f4;--card:#fff;--ink:#14212b;--sub:#5b6b78;--line:#d9e0e6;--acc:#0f766e;--neg:#b4321f;--pos:#0f766e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;padding:max(14px,env(safe-area-inset-top)) 14px max(24px,env(safe-area-inset-bottom))}
+main{max-width:760px;margin:0 auto}
+h1{font-size:20px;margin:4px 0 2px}
+.tag{color:var(--sub);font-size:13px;margin-bottom:14px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+h2{font-size:15px;margin:0 0 10px}
+label{font-size:12px;color:var(--sub);display:block;margin-bottom:2px}
+input,select,textarea{width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:-1px}
+button{font:inherit;border:0;border-radius:6px;padding:8px 12px;background:var(--ink);color:#fff;cursor:pointer}
+button.ghost{background:#e3e9ee;color:var(--ink)}
+button.x{background:transparent;color:var(--neg);padding:4px 8px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.vrow{display:grid;grid-template-columns:1fr 84px 84px 36px;gap:8px;align-items:end;margin-bottom:8px}
+.item{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;border-left-width:4px}
+.item.r{border-left-color:var(--pos)}.item.e{border-left-color:var(--neg)}
+.item .top{display:grid;grid-template-columns:1fr 92px 36px;gap:8px;align-items:end;margin-bottom:8px}
+.hero{font-size:30px;font-weight:700;line-height:1.2}
+.hero small{display:block;font-size:12px;font-weight:400;color:var(--sub)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.kpi{border-top:2px solid var(--line);padding-top:6px}
+.kpi b{display:block;font-size:17px}
+.kpi span{font-size:12px;color:var(--sub)}
+.neg{color:var(--neg)}.pos{color:var(--pos)}
+svg{width:100%;height:auto;display:block;margin-top:10px}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
+th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--sub);font-weight:600}
+.note{font-size:12px;color:var(--sub);margin-top:8px}
+details summary{cursor:pointer;font-weight:600;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<h1>回本與現金流計算機</h1>
+<div class="tag">列出錢在什麼時候進出，系統算出何時回本、最多缺多少錢。</div>
+
+<section>
+<h2>結果</h2>
+<div class="hero" id="payback">—<small>回本時間</small></div>
+<div class="kpis">
+<div class="kpi"><b id="trough">—</b><span>最低谷（需預備的資金）</span></div>
+<div class="kpi"><b id="final">—</b><span id="finalLb">期末累計結餘</span></div>
+</div>
+<div id="chart"></div>
+<div id="warn" class="note"></div>
+</section>
+
+<section>
+<details>
+<summary>快速試算（只想粗估的人從這裡開始）</summary>
+<div class="g3" style="margin-top:10px">
+<div><label>初始投入</label><input type="number" id="q-i" inputmode="decimal"></div>
+<div><label>每月收入</label><input type="number" id="q-r" inputmode="decimal"></div>
+<div><label>每月支出</label><input type="number" id="q-e" inputmode="decimal"></div>
+</div>
+<button style="margin-top:10px" onclick="arm(this,quick)">套用（會取代目前項目）</button>
+</details>
+</section>
+
+<section>
+<h2>基本設定</h2>
+<div class="g2">
+<div><label>評估年數 (1–30)</label><input type="number" id="years" min="1" max="30" inputmode="numeric"></div>
+<div><label>折現率 %／年（0 = 不折現）</label><input type="number" id="disc" step="0.5" inputmode="decimal"></div>
+</div>
+</section>
+
+<section>
+<h2>變數（可選）</h2>
+<div class="note" style="margin:-4px 0 10px">把銷量、客戶數等數字設成變數，多個項目可以共用，改一次全部連動。</div>
+<div id="vars"></div>
+<button class="ghost" onclick="addVar()">＋ 新增變數</button>
+</section>
+
+<section>
+<h2>收支項目</h2>
+<div id="items"></div>
+<button class="ghost" onclick="addItem('r')">＋ 收入</button>
+<button class="ghost" onclick="addItem('e')">＋ 支出</button>
+<div class="note">第 0 月是開局，每月項目預設從第 1 月開始，一次性項目預設在第 0 月。結束月留空 = 持續到最後。勾選「逐批計」後，每批客戶依各自的購買時間開始計費，例如保養費。</div>
+</section>
+
+<section>
+<h2>情境比較</h2>
+<div class="note" style="margin:-4px 0 10px">所有收入、支出各乘一個比例。選中的情境會套用在上方結果與其他分析，三種情境的結果同時列出。</div>
+<div id="sc"></div>
+</section>
+
+<section>
+<h2>反推定價</h2>
+<div class="g2">
+<div><label>要調整的項目</label><select id="rv-item"></select></div>
+<div><label>目標回本年數</label><input type="number" id="rv-yr" value="2" step="0.5" min="0.5" inputmode="decimal"></div>
+</div>
+<button style="margin-top:10px" onclick="reverse()">計算</button>
+<div id="rv-out" style="margin-top:8px;font-size:14px"></div>
+</section>
+
+<section>
+<h2>敏感度</h2>
+<div class="note" style="margin:-4px 0 10px">各數字上下調 10%，對期末累計結餘的影響，越長越值得優先盯緊。變數與使用它的項目會分別列出。</div>
+<div id="sens"></div>
+</section>
+
+<section>
+<h2>逐年明細</h2>
+<div class="tw"><table id="tbl"></table></div>
+</section>
+
+<section>
+<details>
+<summary>進階指標</summary>
+<div class="kpis">
+<div class="kpi"><b id="npv">—</b><span>淨現值 NPV（用上方折現率）</span></div>
+<div class="kpi"><b id="irr">—</b><span>內部報酬率 IRR（年化）</span></div>
+</div>
+</details>
+</section>
+
+<section>
+<details>
+<summary>備份與還原</summary>
+<div class="note" style="margin:6px 0">資料會自動存在這台裝置。要換裝置時，按「匯出」複製文字，在另一台貼上後按「匯入」。</div>
+<textarea id="io" rows="4"></textarea>
+<div style="margin-top:8px"><button class="ghost" onclick="doExport()">匯出</button> <button class="ghost" onclick="doImport()">匯入</button> <button class="x" onclick="arm(this,resetSample)">還原範例</button></div>
+<div id="io-msg" class="note"></div>
+</details>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+const uid=()=>'v'+Math.random().toString(36).slice(2,8);
+const KEY='payback-calc-v2';
+const fmt=n=>(n<0?'-':'')+'$'+Math.round(Math.abs(n)).toLocaleString('en-US');
+
+const dsc=()=>[{n:'保守',r:80,e:110},{n:'基準',r:100,e:100},{n:'樂觀',r:120,e:95}];
+function sample(){
+  const q=uid();
+  return {years:5,disc:0,sc:dsc(),scI:1,
+    vars:[{id:q,name:'每月銷量',val:5}],
+    items:[
+      {name:'開局投入（設備與開發）',type:'e',amt:300000,vid:'',rule:'once',s:'',e:''},
+      {name:'買斷價',type:'r',amt:15000,vid:q,rule:'m',s:'',e:''},
+      {name:'年度保養費（每批客戶購買滿 12 個月起收）',type:'r',amt:1200,vid:q,rule:'y',s:'12',e:'',coh:true},
+      {name:'保固成本',type:'e',amt:400,vid:q,rule:'m',s:'',e:''},
+      {name:'固定營運成本',type:'e',amt:40000,vid:'',rule:'m',s:'',e:''}]};
+}
+let S;
+try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}
+if(!S||!S.items||!S.vars)S=sample();
+
+/* ---------- rendering ---------- */
+function varOpts(sel){
+  return '<option value="">不乘變數</option>'+S.vars.map(v=>`<option value="${v.id}"${v.id===sel?' selected':''}>× ${esc(v.name||'(未命名)')}</option>`).join('');
+}
+function renderVars(){
+  $('vars').innerHTML=S.vars.map((v,i)=>`<div class="vrow" data-id="${v.id}">
+    <div><label>名稱</label><input class="vn" value="${esc(v.name)}" oninput="onVarName()"></div>
+    <div><label>數值</label><input class="vv" type="number" inputmode="decimal" value="${v.val}" oninput="calc()"></div>
+    <div><label>成長%/年</label><input class="vg" type="number" inputmode="decimal" placeholder="0" value="${v.g||''}" oninput="calc()"></div>
+    <button class="x" onclick="delVar(${i})" aria-label="刪除變數">✕</button></div>`).join('')||'<div class="note">尚無變數。</div>';
+}
+function renderItems(){
+  $('items').innerHTML=S.items.map((it,i)=>`<div class="item ${it.type}" data-i="${i}">
+    <div class="top">
+      <div><label>項目名稱</label><input class="in" value="${esc(it.name)}" oninput="calc()"></div>
+      <div><label>類型</label><select class="ty" onchange="typeChg(this)"><option value="r"${it.type==='r'?' selected':''}>收入</option><option value="e"${it.type==='e'?' selected':''}>支出</option></select></div>
+      <button class="x" onclick="delItem(${i})" aria-label="刪除項目">✕</button></div>
+    <div class="g2" style="margin-bottom:8px">
+      <div><label>金額</label><input class="am" type="number" inputmode="decimal" value="${it.amt}" oninput="calc()"></div>
+      <div><label>乘以</label><select class="vs" onchange="calc()">${varOpts(it.vid)}</select></div></div>
+    <div class="g3">
+      <div><label>發生方式</label><select class="ru" onchange="calc()"><option value="once"${it.rule==='once'?' selected':''}>一次性</option><option value="m"${it.rule==='m'?' selected':''}>每月</option><option value="y"${it.rule==='y'?' selected':''}>每年</option></select></div>
+      <div><label>開始月</label><input class="st" type="number" inputmode="numeric" min="0" placeholder="${it.rule==='once'||it.coh?0:1}" value="${it.s}" oninput="calc()"></div>
+      <div><label>結束月</label><input class="en" type="number" inputmode="numeric" min="0" placeholder="到最後" value="${it.e}" oninput="calc()"></div>
+    </div>
+    <label style="margin-top:8px;display:flex;gap:6px;align-items:center;font-size:13px;color:var(--ink)"><input class="co" type="checkbox" style="width:auto"${it.coh?' checked':''} onchange="calc()">逐批計：變數視為每月新增量，開始月＝每批購買後第幾個月</label>
+    <div style="margin-top:8px;max-width:50%"><label>每年流失／衰減 %（可選）</label><input class="ch" type="number" inputmode="decimal" placeholder="0" value="${it.ch||''}" oninput="calc()"></div></div>`).join('')||'<div class="note">尚無項目，請新增收入或支出。</div>';
+}
+function typeChg(el){el.closest('.item').className='item '+el.value;calc()}
+function onVarName(){
+  document.querySelectorAll('#items .vs').forEach(sel=>{
+    const cur=sel.value;
+    const names=[...document.querySelectorAll('#vars .vrow')].map(r=>({id:r.dataset.id,name:r.querySelector('.vn').value}));
+    sel.innerHTML='<option value="">不乘變數</option>'+names.map(v=>`<option value="${v.id}"${v.id===cur?' selected':''}>× ${esc(v.name||'(未命名)')}</option>`).join('');
+  });
+  calc();
+}
+function read(){
+  S.years=Math.min(30,Math.max(1,parseInt($('years').value)||5));
+  S.disc=parseFloat($('disc').value)||0;
+  S.vars=[...document.querySelectorAll('#vars .vrow')].map(r=>({id:r.dataset.id,name:r.querySelector('.vn').value,val:r.querySelector('.vv').value,g:r.querySelector('.vg').value}));
+  S.items=[...document.querySelectorAll('#items .item')].map(r=>({
+    name:r.querySelector('.in').value,type:r.querySelector('.ty').value,amt:r.querySelector('.am').value,
+    vid:r.querySelector('.vs').value,coh:r.querySelector('.co').checked,ch:r.querySelector('.ch').value,rule:r.querySelector('.ru').value,s:r.querySelector('.st').value,e:r.querySelector('.en').value}));
+  const sr=[...document.querySelectorAll('#sc .vrow')];
+  if(sr.length){S.sc=sr.map(r=>({n:r.querySelector('.sn').value,r:parseFloat(r.querySelector('.sr').value)||0,e:parseFloat(r.querySelector('.se').value)||0}));const ck=sr.findIndex(r=>r.querySelector('input[type=radio]').checked);if(ck>=0)S.scI=ck}
+}
+function addVar(){read();S.vars.push({id:uid(),name:'',val:1});renderVars();renderItems();calc()}
+function delVar(i){read();const id=S.vars[i].id;S.vars.splice(i,1);S.items.forEach(t=>{if(t.vid===id)t.vid=''});renderVars();renderItems();calc()}
+function addItem(type){read();S.items.push({name:'',type,amt:0,vid:'',rule:'m',s:'',e:''});renderItems();calc()}
+function delItem(i){read();S.items.splice(i,1);renderItems();calc()}
+
+/* ---------- engine ---------- */
+function engine(items,vars,sc){
+  items=items||S.items;vars=vars||S.vars;
+  const T=S.years*12;
+  const rev=new Array(T+1).fill(0),exp=new Array(T+1).fill(0);
+  const vmap={};vars.forEach(v=>vmap[v.id]=parseFloat(v.val)||0);
+  const gmap={};vars.forEach(v=>gmap[v.id]=(parseFloat(v.g)||0)/100);sc=sc||S.sc[S.scI]||{r:100,e:100};
+  items.forEach(it=>{
+    const A=(parseFloat(it.amt)||0)*((it.type==='r'?sc.r:sc.e)/100),vr=it.vid&&it.vid in vmap,vm=vr?vmap[it.vid]:1,g=vr?gmap[it.vid]:0,c=(parseFloat(it.ch)||0)/100;
+    const amtAt=(tv,t,t0)=>A*vm*Math.pow(1+g,Math.floor(Math.max(0,tv-1)/12))*Math.pow(1-c,Math.floor((t-t0)/12));
+    const arr=it.type==='r'?rev:exp;
+    const sd=(it.rule==='once'||it.coh)?0:1;
+    let s=it.s===''?sd:Math.max(0,parseInt(it.s)||0);
+    let e=it.e===''?T:Math.min(T,parseInt(it.e)||0);
+    const step=it.rule==='m'?1:12;
+    const put=(t0,k)=>{if(it.rule==='once'){if(t0<=T)arr[t0]+=amtAt(k||t0,t0,t0)}else for(let t=t0;t<=e;t+=step)arr[t]+=amtAt(k||t,t,t0)};
+    if(it.coh){for(let k=1;k<=T;k++)put(k+s,k)}else put(s);
+  });
+  const cf=rev.map((r,t)=>r-exp[t]);
+  const bal=[];let b=0;cf.forEach(c=>{b+=c;bal.push(b)});
+  return {T,rev,exp,cf,bal};
+}
+function paybackMonths(bal){
+  let last=-1;bal.forEach((v,t)=>{if(v<0)last=t});
+  if(last<0)return 0;
+  if(last===bal.length-1)return null;
+  const a=bal[last],c=bal[last+1];
+  return last+(-a)/(c-a);
+}
+function npvAt(cf,r){let s=0;cf.forEach((c,t)=>s+=c/Math.pow(1+r,t));return s}
+function irrMonthly(cf){
+  let lo=-0.5,hi=5,flo=npvAt(cf,lo),fhi=npvAt(cf,hi);
+  if(!isFinite(flo)||!isFinite(fhi)||flo*fhi>0)return null;
+  for(let i=0;i<120;i++){const m=(lo+hi)/2,fm=npvAt(cf,m);if(flo*fm<=0){hi=m}else{lo=m;flo=fm}}
+  return (lo+hi)/2;
+}
+function span(m){
+  const tot=Math.round(m),y=Math.floor(tot/12),mo=tot%12;
+  return y?(mo?`${y} 年 ${mo} 個月`:`${y} 年`):`${mo} 個月`;
+}
+
+/* ---------- output ---------- */
+function calc(){
+  read();
+  try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
+  const {T,rev,exp,cf,bal}=engine();
+  const pm=paybackMonths(bal);
+  let minB=Infinity,minT=0;bal.forEach((v,t)=>{if(v<minB){minB=v;minT=t}});
+  const hero=$('payback');
+  if(pm===null){hero.innerHTML=`${S.years} 年內未回本<small>回本時間</small>`;hero.className='hero neg'}
+  else if(pm===0&&bal[0]>=0&&minB>=0){hero.innerHTML=`開局即回本<small>回本時間</small>`;hero.className='hero pos'}
+  else{hero.innerHTML=`${span(pm)}<small>回本時間（累計結餘轉正）</small>`;hero.className='hero pos'}
+  $('trough').innerHTML=minB<0?`<span class="neg">${fmt(-minB)}</span>（第 ${minT} 月）`:'<span class="pos">無資金缺口</span>';
+  const fin=bal[T];
+  $('finalLb').textContent=`第 ${S.years} 年底累計結餘`;
+  $('final').innerHTML=`<span class="${fin>=0?'pos':'neg'}">${fmt(fin)}</span>`;
+  // warnings
+  let w='';
+  const tail=cf.slice(Math.max(1,T-11)).reduce((a,c)=>a+c,0);
+  if(pm===null&&tail<=0)w='最後一年的淨現金流不是正數，照目前的收支永遠無法回本。';
+  else if(pm===null)w='目前評估年數內未回本，可拉長年數或調整收支。';
+  $('warn').textContent=w;
+  // chart
+  $('chart').innerHTML=chart(bal,T,pm,minB,minT);
+  // table
+  let rows='<tr><th>年</th><th>收入</th><th>支出</th><th>淨額</th><th>累計結餘</th></tr>';
+  rows+=row('開局（第0月）',rev[0],exp[0],bal[0]);
+  for(let y=1;y<=S.years;y++){
+    let r=0,e=0;for(let t=12*(y-1)+1;t<=12*y;t++){r+=rev[t];e+=exp[t]}
+    rows+=row('第 '+y+' 年',r,e,bal[12*y]);
+  }
+  $('tbl').innerHTML=rows;
+  // advanced
+  const rm=Math.pow(1+S.disc/100,1/12)-1;
+  const npv=npvAt(cf,rm);
+  $('npv').innerHTML=`<span class="${npv>=0?'pos':'neg'}">${fmt(npv)}</span>`;
+  const im=irrMonthly(cf);
+  $('irr').textContent=im===null?'無法計算':((Math.pow(1+im,12)-1)*100).toFixed(1)+'%';
+  fillRv();sens();scOut();
+}
+function renderSc(){
+  $('sc').innerHTML=S.sc.map((c,i)=>`<div class="vrow" style="grid-template-columns:24px 1fr 64px 64px;margin-bottom:12px"><input type="radio" name="sc" style="width:auto"${i===S.scI?' checked':''} onchange="calc()"><div><label>名稱</label><input class="sn" value="${esc(c.n)}" oninput="calc()"></div><div><label>收入 %</label><input class="sr" type="number" value="${c.r}" oninput="calc()"></div><div><label>支出 %</label><input class="se" type="number" value="${c.e}" oninput="calc()"></div><div id="sco${i}" class="note" style="grid-column:2/5;margin:0"></div></div>`).join('');
+}
+function scOut(){
+  S.sc.forEach((c,i)=>{const el=$('sco'+i);if(!el)return;
+    const e=engine(null,null,c),p=paybackMonths(e.bal),mn=Math.min(...e.bal);
+    el.textContent=(p===null?'未回本':p===0?'開局即回本':'回本 '+span(p))+(mn<0?'｜最低谷 '+fmt(-mn):'')+'｜期末 '+fmt(e.bal[e.T]);});
+}
+function quick(){
+  read();const n=id=>parseFloat($(id).value)||0;
+  S.items=[{name:'初始投入',type:'e',amt:n('q-i'),vid:'',rule:'once',s:'',e:''},{name:'每月收入',type:'r',amt:n('q-r'),vid:'',rule:'m',s:'',e:''},{name:'每月支出',type:'e',amt:n('q-e'),vid:'',rule:'m',s:'',e:''}];
+  init();
+}
+function fillRv(){
+  const el=$('rv-item'),cur=el.value;
+  el.innerHTML=S.items.map((t,i)=>`<option value="${i}">${t.type==='r'?'收入':'支出'}：${esc(t.name||'(未命名)')}</option>`).join('');
+  if(cur!==''&&+cur<S.items.length)el.value=cur;
+}
+function reverse(){
+  read();
+  const i=+$('rv-item').value,it=S.items[i],out=$('rv-out');
+  if(!it){out.textContent='請先新增項目。';return}
+  const tm=(parseFloat($('rv-yr').value)||0)*12;
+  if(tm<=0||tm>S.years*12){out.textContent='目標年數需大於 0，且不超過評估年數。';return}
+  const ok=a=>{const p=paybackMonths(engine(S.items.map((x,j)=>j===i?{...x,amt:a}:x)).bal);return p!==null&&p<=tm+1e-6};
+  const rev=it.type==='r';
+  let hi=Math.max(1,Math.abs(parseFloat(it.amt))||1);
+  if(rev){
+    if(ok(0)){out.textContent='不需要這筆收入，也能在目標時間內回本。';return}
+    for(let k=0;k<40&&!ok(hi);k++)hi*=2;
+    if(!ok(hi)){out.textContent='只調整這個項目無法達成目標。';return}
+  }else{
+    if(!ok(0)){out.textContent='就算這筆支出是 0，也無法達成目標。';return}
+    for(let k=0;k<40&&ok(hi);k++)hi*=2;
+    if(ok(hi)){out.textContent='這筆支出再大也不影響回本目標。';return}
+  }
+  let a=0,b=hi;
+  for(let k=0;k<60;k++){const m=(a+b)/2;if(ok(m)===rev)b=m;else a=m}
+  const res=rev?Math.ceil(b*100)/100:Math.floor(a*100)/100;
+  const f=n=>'$'+n.toLocaleString('en-US',{maximumFractionDigits:2});
+  out.innerHTML=`${rev?'至少需要':'最多只能'} <b class="${rev?'pos':'neg'}">${f(res)}</b>${it.vid?'（乘以變數前的金額）':''}，目前是 ${f(parseFloat(it.amt)||0)}。`;
+}
+function sens(){
+  const T=S.years*12,res=[];
+  S.vars.forEach((v,j)=>{
+    const d=k=>engine(null,S.vars.map((x,n)=>n===j?{...x,val:(parseFloat(x.val)||0)*k}:x)).bal[T];
+    res.push({n:'變數：'+(v.name||'未命名'),d:Math.abs(d(1.1)-d(0.9))/2});
+  });
+  S.items.forEach((it,j)=>{
+    const d=k=>engine(S.items.map((x,n)=>n===j?{...x,amt:(parseFloat(x.amt)||0)*k}:x)).bal[T];
+    res.push({n:(it.type==='r'?'收入：':'支出：')+(it.name||'未命名'),d:Math.abs(d(1.1)-d(0.9))/2});
+  });
+  res.sort((a,b)=>b.d-a.d);
+  const mx=res.length?res[0].d:0;
+  $('sens').innerHTML=res.filter(r=>r.d>0).slice(0,8).map(r=>`<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px;gap:8px"><span>${esc(r.n)}</span><span>±${fmt(r.d)}</span></div><div style="height:6px;background:var(--line);border-radius:3px"><div style="height:6px;border-radius:3px;background:var(--acc);width:${r.d/mx*100}%"></div></div></div>`).join('')||'<div class="note">尚無資料。</div>';
+}
+function row(l,r,e,b){const n=r-e;return `<tr><td>${l}</td><td>${fmt(r)}</td><td>${fmt(e)}</td><td class="${n>=0?'pos':'neg'}">${fmt(n)}</td><td class="${b>=0?'pos':'neg'}"><b>${fmt(b)}</b></td></tr>`}
+function chart(bal,T,pm,minB,minT){
+  const W=600,H=230,p=34;
+  const lo=Math.min(0,...bal),hi=Math.max(0,...bal),rg=(hi-lo)||1;
+  const X=t=>p+t/T*(W-2*p),Y=v=>H-p-(v-lo)/rg*(H-2*p);
+  const pts=bal.map((v,t)=>X(t).toFixed(1)+','+Y(v).toFixed(1)).join(' ');
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="累計結餘走勢圖">`;
+  s+=`<line x1="${p}" y1="${Y(0)}" x2="${W-p}" y2="${Y(0)}" stroke="#9aa8b3" stroke-dasharray="4 3"/>`;
+  s+=`<text x="${p}" y="${Y(0)-5}" font-size="11" fill="#5b6b78">$0</text>`;
+  s+=`<polyline points="${pts}" fill="none" stroke="#14212b" stroke-width="2.5" stroke-linejoin="round"/>`;
+  if(minB<0)s+=`<circle cx="${X(minT)}" cy="${Y(minB)}" r="5" fill="#b4321f"/><text x="${Math.min(Math.max(X(minT),60),W-60)}" y="${Y(minB)+16}" font-size="11" text-anchor="middle" fill="#b4321f">最低谷</text>`;
+  if(pm!==null&&pm>0)s+=`<circle cx="${X(pm)}" cy="${Y(0)}" r="5" fill="#0f766e"/><text x="${Math.min(Math.max(X(pm),60),W-60)}" y="${Y(0)-10}" font-size="11" text-anchor="middle" fill="#0f766e">回本</text>`;
+  for(let y=0;y<=S.years;y+=Math.ceil(S.years/6))s+=`<text x="${X(y*12)}" y="${H-10}" font-size="11" text-anchor="middle" fill="#5b6b78">${y}年</text>`;
+  return s+'</svg>';
+}
+
+/* ---------- backup ---------- */
+function doExport(){read();$('io').value=JSON.stringify(S);$('io-msg').textContent=''}
+function doImport(){
+  try{const d=JSON.parse($('io').value);if(!d.items||!d.vars)throw 0;S=d;init()}
+  catch(e){$('io-msg').textContent='格式不正確，請貼上先前「匯出」的完整文字。'}
+}
+function resetSample(){S=sample();init()}
+function arm(b,fn){
+  if(b.dataset.a){clearTimeout(+b.dataset.a);b.textContent=b.dataset.t;delete b.dataset.a;fn();return}
+  b.dataset.t=b.textContent;b.textContent='再按一次確認';
+  b.dataset.a=setTimeout(()=>{b.textContent=b.dataset.t;delete b.dataset.a},4000);
+}
+function init(){if(!S.sc||S.sc.length!==3){S.sc=dsc();S.scI=1}$('years').value=S.years;$('disc').value=S.disc;renderVars();renderItems();renderSc();calc()}
+$('years').addEventListener('input',calc);$('disc').addEventListener('input',calc);
+init();
+</script>
+</body>
+</html>
